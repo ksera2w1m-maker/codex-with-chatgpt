@@ -24,6 +24,68 @@ interface PendingAuthRequest {
   expiresAt: number;
 }
 
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const REGISTER_RATE_LIMIT = 20;
+const AUTHORIZE_RATE_LIMIT = 60;
+const MAX_PENDING_AUTH_REQUESTS = 128;
+const MAX_PENDING_PER_CLIENT = 4;
+const MAX_REDIRECT_URIS = 8;
+const MAX_REDIRECT_URI_LENGTH = 2048;
+const MAX_RATE_LIMIT_KEYS = 2048;
+
+interface RateBucket {
+  count: number;
+  resetAt: number;
+}
+
+function requestRateKey(req: Request): string {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
+function consumeRateLimit(
+  buckets: Map<string, RateBucket>,
+  key: string,
+  limit: number
+): { ok: true } | { ok: false; retryAfterSeconds: number } {
+  const now = Date.now();
+  if (buckets.size >= MAX_RATE_LIMIT_KEYS) {
+    for (const [bucketKey, bucket] of buckets) {
+      if (now >= bucket.resetAt) buckets.delete(bucketKey);
+    }
+    while (buckets.size >= MAX_RATE_LIMIT_KEYS) {
+      const oldest = buckets.keys().next().value as string | undefined;
+      if (!oldest) break;
+      buckets.delete(oldest);
+    }
+  }
+
+  const bucket = buckets.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    buckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return { ok: true };
+  }
+
+  bucket.count++;
+  if (bucket.count > limit) {
+    return {
+      ok: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+    };
+  }
+  return { ok: true };
+}
+
+function escapeHtml(value: string): string {
+  const entities: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  };
+  return value.replace(/[&<>"']/g, (char) => entities[char]);
+}
+
 function isAllowedRedirectUri(uri: string): boolean {
   let parsed: URL;
   try {
@@ -31,8 +93,12 @@ function isAllowedRedirectUri(uri: string): boolean {
   } catch {
     return false;
   }
+  if (parsed.hash) return false;
   if (parsed.protocol === "https:") return true;
-  if (parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")) {
+  if (
+    parsed.protocol === "http:" &&
+    (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1")
+  ) {
     return true;
   }
   return false;
@@ -78,17 +144,17 @@ function pairingPage(opts: {
     offline_access: "Stay connected between sessions",
   };
   const scopeList = opts.scopes
-    .map((scope) => `<li>${scopeLabels[scope] ?? scope}</li>`)
+    .map((scope) => `<li>${escapeHtml(scopeLabels[scope] ?? scope)}</li>`)
     .join("");
   const errorHtml = opts.error
-    ? `<p class="error" role="alert">${opts.error}</p>`
+    ? `<p class="error" role="alert">${escapeHtml(opts.error)}</p>`
     : "";
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${PRODUCT_NAME}</title>
+<title>${escapeHtml(PRODUCT_NAME)}</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -114,11 +180,11 @@ function pairingPage(opts: {
 </head>
 <body>
 <div class="card">
-  <h1>${PRODUCT_NAME}</h1>
-  <p class="sub">ChatGPT is requesting access to workspace <strong>${opts.workspaceName}</strong> (read-only):</p>
+  <h1>${escapeHtml(PRODUCT_NAME)}</h1>
+  <p class="sub">ChatGPT is requesting access to workspace <strong>${escapeHtml(opts.workspaceName)}</strong> (read-only):</p>
   <ul>${scopeList}</ul>
   <form method="POST" action="authorize">
-    <input type="hidden" name="request_id" value="${opts.requestId}">
+    <input type="hidden" name="request_id" value="${escapeHtml(opts.requestId)}">
     <input type="text" name="pairing_code" id="pairing_code" placeholder="XXXX-XXXX"
            autocomplete="one-time-code" autofocus maxlength="9" required>
     ${errorHtml}
@@ -130,9 +196,30 @@ function pairingPage(opts: {
 </html>`;
 }
 
+function sendPairingPage(
+  res: Response,
+  status: number,
+  opts: Parameters<typeof pairingPage>[0]
+): void {
+  res
+    .status(status)
+    .set({
+      "cache-control": "no-store",
+      "content-security-policy":
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "permissions-policy": "camera=(), microphone=(), geolocation=()",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+    })
+    .type("html")
+    .send(pairingPage(opts));
+}
+
 export function createOAuthRouter(deps: OAuthDeps): Router {
   const router = Router();
   const pendingRequests = new Map<string, PendingAuthRequest>();
+  const registrationRate = new Map<string, RateBucket>();
+  const authorizationRate = new Map<string, RateBucket>();
 
   const prunePending = (): void => {
     const now = Date.now();
@@ -157,23 +244,49 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
 
   // ---- Dynamic Client Registration (RFC 7591) ------------------------------
 
-  router.post("/oauth/register", json(), (req, res) => {
+  router.post("/oauth/register", json({ limit: "32kb" }), (req, res) => {
+    const rate = consumeRateLimit(registrationRate, requestRateKey(req), REGISTER_RATE_LIMIT);
+    if (!rate.ok) {
+      res
+        .status(429)
+        .set("retry-after", String(rate.retryAfterSeconds))
+        .json({ error: "temporarily_unavailable", error_description: "Too many registration requests" });
+      return;
+    }
+
     const body = req.body as { client_name?: string; redirect_uris?: unknown };
     const redirectUris = Array.isArray(body.redirect_uris) ? body.redirect_uris : [];
     if (
       redirectUris.length === 0 ||
-      !redirectUris.every((uri) => typeof uri === "string" && isAllowedRedirectUri(uri))
+      redirectUris.length > MAX_REDIRECT_URIS ||
+      !redirectUris.every(
+        (uri) =>
+          typeof uri === "string" &&
+          uri.length <= MAX_REDIRECT_URI_LENGTH &&
+          isAllowedRedirectUri(uri)
+      )
     ) {
       res.status(400).json({
         error: "invalid_redirect_uri",
-        error_description: "redirect_uris must be https URLs (or http://localhost for development)",
+        error_description: "redirect_uris must be a small set of valid HTTPS URLs (or localhost for development)",
       });
       return;
     }
+    const clientName =
+      typeof body.client_name === "string"
+        ? body.client_name.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 200)
+        : undefined;
     const client = deps.store.registerClient({
-      clientName: typeof body.client_name === "string" ? body.client_name.slice(0, 200) : undefined,
+      clientName,
       redirectUris: redirectUris as string[],
     });
+    if (!client) {
+      res.status(429).json({
+        error: "temporarily_unavailable",
+        error_description: "OAuth client registration capacity is temporarily exhausted",
+      });
+      return;
+    }
     deps.logger.info(`Registered OAuth client ${client.clientId} (${client.clientName ?? "unnamed"})`);
     res.status(201).json({
       client_id: client.clientId,
@@ -189,10 +302,27 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
 
   router.get("/oauth/authorize", (req, res) => {
     prunePending();
+    const rate = consumeRateLimit(authorizationRate, requestRateKey(req), AUTHORIZE_RATE_LIMIT);
+    if (!rate.ok) {
+      res.status(429).set("retry-after", String(rate.retryAfterSeconds)).send("Too many authorization requests.");
+      return;
+    }
+    if (pendingRequests.size >= MAX_PENDING_AUTH_REQUESTS) {
+      res.status(429).send("Too many pending authorization requests. Please retry shortly.");
+      return;
+    }
+
     const query = req.query as Record<string, string | undefined>;
     const client = query.client_id ? deps.store.getClient(query.client_id) : undefined;
     if (!client) {
       res.status(400).send("Unknown client. Please reconnect from ChatGPT.");
+      return;
+    }
+    const pendingForClient = [...pendingRequests.values()].filter(
+      (request) => request.clientId === client.clientId
+    ).length;
+    if (pendingForClient >= MAX_PENDING_PER_CLIENT) {
+      res.status(429).send("Too many pending authorization requests for this client.");
       return;
     }
     const redirectUri = query.redirect_uri;
@@ -215,6 +345,14 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
       fail("invalid_request", "PKCE with S256 is required");
       return;
     }
+    const requestedScopes = (query.scope ?? "").split(/[\s+]+/).filter(Boolean);
+    const unsupportedScopes = requestedScopes.filter(
+      (scope) => !(SUPPORTED_SCOPES as readonly string[]).includes(scope)
+    );
+    if (unsupportedScopes.length > 0) {
+      fail("invalid_scope", "One or more requested scopes are not supported");
+      return;
+    }
     const scopes = filterScopes(query.scope);
     const request: PendingAuthRequest = {
       id: randomBytes(16).toString("hex"),
@@ -227,10 +365,7 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
       expiresAt: Date.now() + 10 * 60_000,
     };
     pendingRequests.set(request.id, request);
-    res
-      .status(200)
-      .type("html")
-      .send(pairingPage({ requestId: request.id, workspaceName: deps.workspaceName, scopes }));
+    sendPairingPage(res, 200, { requestId: request.id, workspaceName: deps.workspaceName, scopes });
   });
 
   router.post("/oauth/authorize", urlencoded({ extended: false }), (req, res) => {
@@ -251,17 +386,12 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
         no_active_session: "No active pairing session. Ask Codex to generate a pairing code.",
       };
       deps.logger.warn(`Pairing verification failed: ${verdict.reason}`);
-      res
-        .status(verdict.reason === "invalid" ? 401 : 410)
-        .type("html")
-        .send(
-          pairingPage({
-            requestId: request.id,
-            workspaceName: deps.workspaceName,
-            scopes: request.scopes,
-            error: messages[verdict.reason] ?? "Verification failed.",
-          })
-        );
+      sendPairingPage(res, verdict.reason === "invalid" ? 401 : 410, {
+        requestId: request.id,
+        workspaceName: deps.workspaceName,
+        scopes: request.scopes,
+        error: messages[verdict.reason] ?? "Verification failed.",
+      });
       return;
     }
     pendingRequests.delete(request.id);
