@@ -104,7 +104,7 @@ Inside the checkout directory (see Locations):
 
 ## Workflow: first-time setup（"使用 Codex with ChatGPT 完成首次配置"）
 
-1. Detect prerequisites yourself: `node --version` (>= 20), and check `cloudflared`.
+1. Detect prerequisites yourself: `node --version` (>= 22.13), and check `cloudflared`.
    - If cloudflared is missing on macOS run `brew install cloudflared`; on Windows use
      `winget install Cloudflare.cloudflared`. Do this yourself; don't ask.
 2. If the c2c repo has no `node_modules`, run `corepack pnpm install --frozen-lockfile && corepack pnpm build` in it.
