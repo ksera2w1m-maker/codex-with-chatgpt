@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { IgnoreRules } from "./ignore.js";
 
 export interface GitCommandResult {
   ok: boolean;
@@ -125,42 +126,61 @@ export interface GitDiffResult {
   diff: string;
 }
 
-const SENSITIVE_DIFF_EXCLUDES = [
-  ":(exclude,glob)**/.env",
-  ":(exclude,glob)**/.env.*",
-  ":(exclude,glob)**/*.pem",
-  ":(exclude,glob)**/*.key",
-  ":(exclude,glob)**/id_rsa*",
-  ":(exclude,glob)**/id_ed25519*",
-];
+function diffArgs(mode: DiffMode, namesOnly: boolean): string[] {
+  const args: string[] = [
+    "--literal-pathspecs",
+    "diff",
+    "--relative",
+    "--no-renames",
+    "--no-ext-diff",
+    "--no-textconv",
+  ];
+  if (namesOnly) args.push("--name-only", "-z");
+  else args.push("--no-color");
+  if (mode === "staged") args.push("--cached");
+  if (mode === "head") args.push("HEAD");
+  return args;
+}
 
 export function gitDiff(root: string, opts: GitDiffOptions = {}, relPath?: string): GitDiffResult {
   const mode = opts.mode ?? "unstaged";
   const offset = Math.max(0, Math.floor(opts.offset ?? 0));
   const maxBytes = Math.min(256 * 1024, Math.max(1024, Math.floor(opts.maxBytes ?? 64 * 1024)));
+  const empty = (isRepo: boolean): GitDiffResult => ({
+    isRepo,
+    mode,
+    totalBytes: 0,
+    offset: 0,
+    returnedBytes: 0,
+    hasMore: false,
+    nextOffset: null,
+    diff: "",
+  });
 
-  const base: string[] = ["diff", "--no-color"];
-  if (mode === "staged") base.push("--cached");
-  if (mode === "head") base.push("HEAD");
-  base.push("--");
-  // Keep the sensitive-file exclusions even when the caller narrows the diff
-  // to a directory. Otherwise a request for e.g. `src` could include
-  // `src/.env` or another secret nested below that directory.
-  base.push(relPath || ".", ...SENSITIVE_DIFF_EXCLUDES);
-
-  const result = runGit(root, base);
-  if (!result.ok && /not a git repository/i.test(result.stderr)) {
-    return {
-      isRepo: false,
-      mode,
-      totalBytes: 0,
-      offset: 0,
-      returnedBytes: 0,
-      hasMore: false,
-      nextOffset: null,
-      diff: "",
-    };
+  // Enumerate changed paths first, then apply the exact same sensitive-file
+  // policy used by read_file/list/search. This keeps built-in patterns and the
+  // workspace's .c2cignore in sync with git_diff automatically.
+  const namesArgs = diffArgs(mode, true);
+  namesArgs.push("--", relPath || ".");
+  const names = runGit(root, namesArgs);
+  if (!names.ok) {
+    return /not a git repository/i.test(names.stderr) ? empty(false) : empty(true);
   }
+
+  const rules = new IgnoreRules(root);
+  const allowedPaths = names.stdout
+    .split("\0")
+    .filter(Boolean)
+    .filter((filePath) => !rules.isSensitive(filePath));
+  if (allowedPaths.length === 0) return empty(true);
+
+  const base = diffArgs(mode, false);
+  base.push("--", ...allowedPaths);
+  const result = runGit(root, base);
+  if (!result.ok) {
+    return /not a git repository/i.test(result.stderr) ? empty(false) : empty(true);
+  }
+
   const full = Buffer.from(result.stdout, "utf8");
   const slice = full.subarray(offset, offset + maxBytes);
   let text = slice.toString("utf8");
