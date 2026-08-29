@@ -111,6 +111,41 @@ describe("gitDiff pagination", () => {
     git(repo, "rm", "-f", "--cached", "private/.env");
   });
 
+  it("applies the full workspace sensitive-file policy to git diffs", () => {
+    const sensitive = [
+      [".npmrc", "NPM_TOKEN=must-not-leak"],
+      ["credentials.json", "CLOUD_CREDENTIAL=must-not-leak"],
+      ["certs/client.p12", "P12_SECRET=must-not-leak"],
+      ["keys/id_ecdsa", "ECDSA_SECRET=must-not-leak"],
+      ["nested/.aws/credentials", "AWS_SECRET=must-not-leak"],
+    ] as const;
+    for (const [file, content] of sensitive) {
+      write(repo, file, `${content}\n`);
+      git(repo, "add", "-f", file);
+    }
+    const diff = gitDiff(repo, { mode: "staged" });
+    for (const [, content] of sensitive) expect(diff.diff).not.toContain(content);
+    git(repo, "reset", "--", ...sensitive.map(([file]) => file));
+  });
+
+  it("honors .c2cignore in git diffs", () => {
+    write(repo, ".c2cignore", "private-notes/\n");
+    write(repo, "private-notes/secret.txt", "CUSTOM_SECRET=must-not-leak\n");
+    git(repo, "add", ".c2cignore");
+    git(repo, "add", "-f", "private-notes/secret.txt");
+    const diff = gitDiff(repo, { mode: "staged" });
+    expect(diff.diff).not.toContain("CUSTOM_SECRET=must-not-leak");
+    git(repo, "reset", "--", ".c2cignore", "private-notes/secret.txt");
+  });
+
+  it("still allows explicitly safe .env.example diffs", () => {
+    write(repo, ".env.example", "API_KEY=replace-me\n");
+    git(repo, "add", ".env.example");
+    const diff = gitDiff(repo, { mode: "staged" });
+    expect(diff.diff).toContain("API_KEY=replace-me");
+    git(repo, "reset", "--", ".env.example");
+  });
+
   it("handles non-repos gracefully", () => {
     const diff = gitDiff(plain, { mode: "unstaged" });
     expect(diff.isRepo).toBe(false);
