@@ -124,7 +124,6 @@ describe("authorization + token flow", () => {
     expect(token.body.refresh_token).toMatch(/^c2c_rt_/);
     expect(token.body.token_type).toBe("Bearer");
 
-    // authorized MCP request
     const mcpResponse = await fetch(`${base}/mcp`, {
       method: "POST",
       headers: {
@@ -132,12 +131,7 @@ describe("authorization + token flow", () => {
         accept: "application/json, text/event-stream",
         authorization: `Bearer ${token.body.access_token}`,
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {},
-      }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
     });
     expect(mcpResponse.status).toBe(200);
   });
@@ -191,6 +185,100 @@ describe("authorization + token flow", () => {
       body: JSON.stringify({ redirect_uris: ["http://evil.example.com/cb"] }),
     });
     expect(response.status).toBe(400);
+  });
+
+  it("rejects unsupported scopes instead of granting defaults", async () => {
+    const clientId = await registerClient();
+    const { challenge } = pkceVerifierAndChallenge();
+    const authorizeUrl = new URL(`${base}/oauth/authorize`);
+    authorizeUrl.searchParams.set("client_id", clientId);
+    authorizeUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+    authorizeUrl.searchParams.set("response_type", "code");
+    authorizeUrl.searchParams.set("code_challenge", challenge);
+    authorizeUrl.searchParams.set("code_challenge_method", "S256");
+    authorizeUrl.searchParams.set("scope", "workspace.read admin.root");
+    const response = await fetch(authorizeUrl, { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("error=invalid_scope");
+  });
+});
+
+describe("authorization surface hardening", () => {
+  it("escapes untrusted workspace names and sends a restrictive CSP", async () => {
+    const xssRoot = makeTmpDir("oauth-xss");
+    const authRoot = makeTmpDir("oauth-xss-auth");
+    write(xssRoot, ".c2c.json", JSON.stringify({ name: '</strong><script>alert("xss")</script><strong>' }));
+    const xssBridge = await startBridge({
+      workspaceRoot: xssRoot,
+      port: 0,
+      persistRuntime: false,
+      authStoreFile: path.join(authRoot, "store.json"),
+    });
+    try {
+      const xssBase = xssBridge.localBaseUrl();
+      const registration = await fetch(`${xssBase}/oauth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ client_name: "XSS-Test", redirect_uris: [REDIRECT_URI] }),
+      });
+      const { client_id: clientId } = (await registration.json()) as { client_id: string };
+      const { challenge } = pkceVerifierAndChallenge();
+      const authorizeUrl = new URL(`${xssBase}/oauth/authorize`);
+      authorizeUrl.searchParams.set("client_id", clientId);
+      authorizeUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+      authorizeUrl.searchParams.set("response_type", "code");
+      authorizeUrl.searchParams.set("code_challenge", challenge);
+      authorizeUrl.searchParams.set("code_challenge_method", "S256");
+      authorizeUrl.searchParams.set("scope", "workspace.read");
+
+      const response = await fetch(authorizeUrl, { redirect: "manual" });
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).not.toContain('<script>alert("xss")</script>');
+      expect(html).toContain("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
+      expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
+      expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      expect(response.headers.get("cache-control")).toContain("no-store");
+    } finally {
+      await xssBridge.close();
+      cleanup(xssRoot);
+      cleanup(authRoot);
+    }
+  });
+
+  it("rate-limits registration floods and bounds persisted client state", async () => {
+    const floodRoot = makeTmpDir("oauth-flood");
+    const authRoot = makeTmpDir("oauth-flood-auth");
+    write(floodRoot, "hello.txt", "hello\n");
+    const floodBridge = await startBridge({
+      workspaceRoot: floodRoot,
+      port: 0,
+      persistRuntime: false,
+      authStoreFile: path.join(authRoot, "store.json"),
+    });
+    try {
+      const floodBase = floodBridge.localBaseUrl();
+      const statuses: number[] = [];
+      for (let i = 0; i < 21; i++) {
+        const response = await fetch(`${floodBase}/oauth/register`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ client_name: `Flood-${i}`, redirect_uris: [REDIRECT_URI] }),
+        });
+        statuses.push(response.status);
+      }
+      expect(statuses.filter((status) => status === 201)).toHaveLength(20);
+      expect(statuses[20]).toBe(429);
+
+      for (let i = 0; i < 100; i++) {
+        floodBridge.authStore.registerClient({ clientName: `Direct-${i}`, redirectUris: [REDIRECT_URI] });
+      }
+      expect(floodBridge.authStore.clientCount()).toBeLessThanOrEqual(64);
+    } finally {
+      await floodBridge.close();
+      cleanup(floodRoot);
+      cleanup(authRoot);
+    }
   });
 });
 
