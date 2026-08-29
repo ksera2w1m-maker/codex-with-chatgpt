@@ -1,0 +1,57 @@
+name: Security Hardening Validation
+
+on:
+  push:
+    branches: [security-hardening]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  harden-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Apply one-time policy hardening
+        run: python3 scripts/apply-security-hardening-policy.py
+
+      - name: Install locked dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: corepack pnpm typecheck
+
+      - name: Test
+        run: corepack pnpm test
+
+      - name: Build
+        run: corepack pnpm build
+
+      - name: Validate diff whitespace
+        run: git diff --check
+
+      - name: Commit hardened docs if changed
+        shell: bash
+        run: |
+          if git diff --quiet -- README.md README.zh-CN.md skill/SKILL.md docs/security.md; then
+            echo "Policy/docs already hardened."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md README.zh-CN.md skill/SKILL.md docs/security.md
+          git commit -m "security: require explicit approval for updates"
+          git push origin HEAD:security-hardening
