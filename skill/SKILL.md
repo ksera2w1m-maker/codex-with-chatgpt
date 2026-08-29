@@ -58,7 +58,7 @@ whatever data it needs by itself.
 - CLI: run `node /Users/xiaoduo_/Codex_With_ChatGPT/bin/c2c.js <command>`
   (or `c2c <command>` if globally linked). All commands support `--json` for parsing.
 - If the checkout has no `node_modules` or no `dist/`, first run
-  `corepack pnpm install && corepack pnpm build` inside it.
+  `corepack pnpm install --frozen-lockfile && corepack pnpm build` inside it.
 - Always pass `-w <workspace root>` (the project the user is working on, NOT the c2c repo).
 
 ## Daily update check
@@ -75,22 +75,31 @@ commands (both are cheap / cached; never mention them unless an update exists):
 
 - `{ "updateAvailable": false }` → continue silently. Never mention the check.
 - `{ "updateAvailable": true }` → tell the user one line:
-  "检测到 Codex with ChatGPT 有新版本，我先更新一下（约 1 分钟），随后继续你的任务。"
-  Then run the update workflow below, and CONTINUE the original task afterwards.
+  "检测到 Codex with ChatGPT 有新版本。出于安全考虑我不会自动安装；需要更新时请明确回复『更新 Codex with ChatGPT』。"
+  Do NOT run `git pull`, install packages, build, restart, stash local changes,
+  or otherwise apply the update. Continue the user's original task unchanged.
 
-## Workflow: update（"更新 Codex with ChatGPT"，or triggered by the daily check）
+## Workflow: update（ONLY after explicit user approval）
 
 Inside the checkout directory (see Locations):
 
-1. `git pull --ff-only` (if it fails due to local edits: `git stash && git pull --ff-only`).
-2. `corepack pnpm install && corepack pnpm build`.
-3. Re-install the Skill: copy `skill/SKILL.md` to
+1. Confirm that this workflow was triggered by an explicit user request such as
+   "更新 Codex with ChatGPT". A daily update check is NEVER sufficient approval.
+2. Run `git status --short`. If there are local edits, STOP and tell the user;
+   NEVER run `git stash`, `git reset`, or discard local changes automatically.
+3. Run `git fetch origin`, then inspect `git log --oneline HEAD..origin/main` and
+   `git diff --stat HEAD..origin/main`. If the remote branch cannot be verified,
+   STOP instead of executing unreviewed code.
+4. Apply only a fast-forward update: `git pull --ff-only`.
+5. Install exactly the locked dependency graph and build:
+   `corepack pnpm install --frozen-lockfile && corepack pnpm build`.
+6. Re-install the Skill: copy `skill/SKILL.md` to
    `~/.codex/skills/codex-with-chatgpt/SKILL.md`, then fix the "checkout lives at:"
    line in the copy to the actual checkout path.
-4. `c2c sandbox-allow --json` (so existing installs pick up the sandbox allowlist),
+7. `c2c sandbox-allow --json` (so existing installs pick up the sandbox allowlist),
    then `c2c restart -w <workspace>` so the bridge runs the new code, then
    `c2c update-check --force --json` to refresh the cache (should now report up to date).
-5. Tell the user "✓ 已更新到最新版本" — then resume whatever task triggered this.
+8. Tell the user "✓ 已更新到最新版本" — then resume whatever task triggered this.
    (The updated SKILL.md takes effect from the next Codex session; that's expected.)
 
 ## Workflow: first-time setup（"使用 Codex with ChatGPT 完成首次配置"）
@@ -98,7 +107,7 @@ Inside the checkout directory (see Locations):
 1. Detect prerequisites yourself: `node --version` (>= 20), and check `cloudflared`.
    - If cloudflared is missing on macOS run `brew install cloudflared`; on Windows use
      `winget install Cloudflare.cloudflared`. Do this yourself; don't ask.
-2. If the c2c repo has no `node_modules`, run `pnpm install && pnpm build` in it.
+2. If the c2c repo has no `node_modules`, run `corepack pnpm install --frozen-lockfile && corepack pnpm build` in it.
 3. Run: `c2c sandbox-allow --json` then `c2c setup -w <workspace> --json`.
    `sandbox-allow` edits Codex `config.toml` only — it adds C2C's state directory
    to `[sandbox_workspace_write].writable_roots` so later chats can write logs
