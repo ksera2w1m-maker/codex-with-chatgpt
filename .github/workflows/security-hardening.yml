@@ -3,6 +3,8 @@ name: Security Hardening Validation
 on:
   push:
     branches: [security-hardening]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -44,6 +46,7 @@ jobs:
         run: git diff --check
 
       - name: Commit hardened docs if changed
+        if: github.event_name == 'push'
         shell: bash
         run: |
           if git diff --quiet -- README.md README.zh-CN.md skill/SKILL.md docs/security.md; then
