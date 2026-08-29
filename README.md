@@ -40,8 +40,9 @@ Detailed docs below are in English · 详细中文文档见 **[README.zh-CN.md](
 1. 环境自检：需要 git 和 Node.js ≥ 20，缺什么就自动安装
   （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
 2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
-   ~/codex-with-chatgpt（已存在就 git pull 更新）。
-3. 构建：在该目录里执行 corepack pnpm install 和 corepack pnpm build。
+   ~/codex-with-chatgpt。已存在时只检查是否有更新；没有我的明确同意，禁止
+   git pull、安装依赖或执行更新后的代码。
+3. 构建：在该目录里执行 corepack pnpm install --frozen-lockfile 和 corepack pnpm build。
 4. 安装 Skill：把仓库里的 skill/SKILL.md 复制到
    ~/.codex/skills/codex-with-chatgpt/SKILL.md，并把文件中
    "The codex-with-chatgpt checkout lives at:" 那一行的路径改成实际克隆路径。
@@ -66,8 +67,9 @@ I am a non-technical user — do everything yourself:
    anything missing yourself (macOS: Homebrew, Windows: winget). Also install
    cloudflared.
 2. Download: clone https://github.com/XiaoDuoYa/codex-with-chatgpt into
-   ~/codex-with-chatgpt (if it already exists, git pull to update).
-3. Build: inside that folder run `corepack pnpm install` then `corepack pnpm build`.
+   ~/codex-with-chatgpt. If it already exists, check for updates but NEVER pull
+   or install them without my explicit approval.
+3. Build: inside that folder run `corepack pnpm install --frozen-lockfile` then `corepack pnpm build`.
 4. Install the Skill: copy skill/SKILL.md to
    ~/.codex/skills/codex-with-chatgpt/SKILL.md, and update the line
    "The codex-with-chatgpt checkout lives at:" to the actual clone path.
@@ -82,10 +84,11 @@ I am a non-technical user — do everything yourself:
 ```
 
 
-**Updates · 更新** — The Skill checks GitHub once a day and updates itself when a
-new version is released; no action needed. You can also say "更新 Codex with ChatGPT"
-anytime. / Skill 每天自动检查一次 GitHub，有新版本会自动更新，无需任何操作；
-也可以随时对 Codex 说"更新 Codex with ChatGPT"。
+**Updates · 更新** — The Skill checks GitHub once a day, but it never installs an
+update automatically. When an update exists it only notifies you; applying it
+requires explicit approval. You can also say "更新 Codex with ChatGPT" anytime. /
+Skill 每天只自动检查一次 GitHub，不会自动安装更新。发现新版本时只会通知你，
+必须得到你的明确同意后才会更新；也可以随时对 Codex 说"更新 Codex with ChatGPT"。
 
 ---
 
