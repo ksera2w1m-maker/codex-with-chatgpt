@@ -27,7 +27,7 @@ Agent（Codex），然后去倒杯咖啡：
 
 1. 环境自检：需要 git 和 Node.js ≥ 22.13，缺什么就自动安装
   （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
-2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
+2. 下载：把 https://github.com/ksera2w1m-maker/codex-with-chatgpt 克隆到
    ~/codex-with-chatgpt。已存在时只检查是否有更新；没有我的明确同意，禁止
    git pull、安装依赖或执行更新后的代码。
 3. 构建：在该目录里执行 corepack pnpm install --frozen-lockfile 和 corepack pnpm build。
@@ -124,7 +124,7 @@ Ready.
 ```bash
 pnpm install
 pnpm build          # 产出 dist/，暴露 c2c 命令
-pnpm test           # vitest：76 个测试（路径安全、OAuth、配对、MCP 端到端）
+pnpm test           # vitest：93 个测试（路径安全、OAuth、配对、MCP 端到端）
 
 c2c setup           # 一条命令：Bridge + 隧道 + 配对码
 c2c sandbox-allow   # 把本地设置目录加入 Codex 沙箱白名单（macOS / Windows）

@@ -39,7 +39,7 @@ Detailed docs below are in English · 详细中文文档见 **[README.zh-CN.md](
 
 1. 环境自检：需要 git 和 Node.js ≥ 22.13，缺什么就自动安装
   （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
-2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
+2. 下载：把 https://github.com/ksera2w1m-maker/codex-with-chatgpt 克隆到
    ~/codex-with-chatgpt。已存在时只检查是否有更新；没有我的明确同意，禁止
    git pull、安装依赖或执行更新后的代码。
 3. 构建：在该目录里执行 corepack pnpm install --frozen-lockfile 和 corepack pnpm build。
@@ -66,7 +66,7 @@ I am a non-technical user — do everything yourself:
 1. Check the environment: git and Node.js >= 22.13 must be available. Install
    anything missing yourself (macOS: Homebrew, Windows: winget). Also install
    cloudflared.
-2. Download: clone https://github.com/XiaoDuoYa/codex-with-chatgpt into
+2. Download: clone https://github.com/ksera2w1m-maker/codex-with-chatgpt into
    ~/codex-with-chatgpt. If it already exists, check for updates but NEVER pull
    or install them without my explicit approval.
 3. Build: inside that folder run `corepack pnpm install --frozen-lockfile` then `corepack pnpm build`.
@@ -177,7 +177,7 @@ Full threat model: [docs/security.md](docs/security.md)
 ```bash
 pnpm install
 pnpm build          # -> dist/, exposes the `c2c` bin
-pnpm test           # vitest: 76 tests (path security, OAuth, pairing, MCP e2e)
+pnpm test           # vitest: 93 tests (path security, OAuth, pairing, MCP e2e)
 
 c2c setup           # bridge + tunnel + pairing code, all in one
 c2c sandbox-allow   # whitelist the settings dir in Codex (macOS + Windows)
