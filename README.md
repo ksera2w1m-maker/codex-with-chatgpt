@@ -37,11 +37,12 @@ Detailed docs below are in English · 详细中文文档见 **[README.zh-CN.md](
 请帮我完整安装并配置 Codex with ChatGPT，全程自动，我是不懂技术的小白，
 所有事情你自己做：
 
-1. 环境自检：需要 git 和 Node.js ≥ 20，缺什么就自动安装
+1. 环境自检：需要 git 和 Node.js ≥ 22.13，缺什么就自动安装
   （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
-2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
-   ~/codex-with-chatgpt（已存在就 git pull 更新）。
-3. 构建：在该目录里执行 corepack pnpm install 和 corepack pnpm build。
+2. 下载：把 https://github.com/ksera2w1m-maker/codex-with-chatgpt 克隆到
+   ~/codex-with-chatgpt。已存在时只检查是否有更新；没有我的明确同意，禁止
+   git pull、安装依赖或执行更新后的代码。
+3. 构建：在该目录里执行 corepack pnpm install --frozen-lockfile 和 corepack pnpm build。
 4. 安装 Skill：把仓库里的 skill/SKILL.md 复制到
    ~/.codex/skills/codex-with-chatgpt/SKILL.md，并把文件中
    "The codex-with-chatgpt checkout lives at:" 那一行的路径改成实际克隆路径。
@@ -62,12 +63,13 @@ paragraph below, paste it to your coding agent (Codex), and go grab a coffee:
 Please install and configure "Codex with ChatGPT" for me, fully automatically.
 I am a non-technical user — do everything yourself:
 
-1. Check the environment: git and Node.js >= 20 must be available. Install
+1. Check the environment: git and Node.js >= 22.13 must be available. Install
    anything missing yourself (macOS: Homebrew, Windows: winget). Also install
    cloudflared.
-2. Download: clone https://github.com/XiaoDuoYa/codex-with-chatgpt into
-   ~/codex-with-chatgpt (if it already exists, git pull to update).
-3. Build: inside that folder run `corepack pnpm install` then `corepack pnpm build`.
+2. Download: clone https://github.com/ksera2w1m-maker/codex-with-chatgpt into
+   ~/codex-with-chatgpt. If it already exists, check for updates but NEVER pull
+   or install them without my explicit approval.
+3. Build: inside that folder run `corepack pnpm install --frozen-lockfile` then `corepack pnpm build`.
 4. Install the Skill: copy skill/SKILL.md to
    ~/.codex/skills/codex-with-chatgpt/SKILL.md, and update the line
    "The codex-with-chatgpt checkout lives at:" to the actual clone path.
@@ -82,10 +84,11 @@ I am a non-technical user — do everything yourself:
 ```
 
 
-**Updates · 更新** — The Skill checks GitHub once a day and updates itself when a
-new version is released; no action needed. You can also say "更新 Codex with ChatGPT"
-anytime. / Skill 每天自动检查一次 GitHub，有新版本会自动更新，无需任何操作；
-也可以随时对 Codex 说"更新 Codex with ChatGPT"。
+**Updates · 更新** — The Skill checks GitHub once a day, but it never installs an
+update automatically. When an update exists it only notifies you; applying it
+requires explicit approval. You can also say "更新 Codex with ChatGPT" anytime. /
+Skill 每天只自动检查一次 GitHub，不会自动安装更新。发现新版本时只会通知你，
+必须得到你的明确同意后才会更新；也可以随时对 Codex 说"更新 Codex with ChatGPT"。
 
 ---
 
@@ -174,14 +177,14 @@ Full threat model: [docs/security.md](docs/security.md)
 ```bash
 pnpm install
 pnpm build          # -> dist/, exposes the `c2c` bin
-pnpm test           # vitest: 76 tests (path security, OAuth, pairing, MCP e2e)
+pnpm test           # vitest: 93 tests (path security, OAuth, pairing, MCP e2e)
 
 c2c setup           # bridge + tunnel + pairing code, all in one
 c2c sandbox-allow   # whitelist the settings dir in Codex (macOS + Windows)
 c2c status / doctor / pair / unpair / logs / stop
 ```
 
-Requirements: Node.js >= 20, git. `cloudflared` for the public connection
+Requirements: Node.js >= 22.13, git. `cloudflared` for the public connection
 (auto-detected; the Skill installs it for you).
 
 Docs: [architecture](docs/architecture.md) · [protocol](docs/protocol.md) ·

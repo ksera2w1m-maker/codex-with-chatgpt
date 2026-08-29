@@ -25,11 +25,12 @@ Agent（Codex），然后去倒杯咖啡：
 请帮我完整安装并配置 Codex with ChatGPT，全程自动，我是不懂技术的小白，
 所有事情你自己做：
 
-1. 环境自检：需要 git 和 Node.js ≥ 20，缺什么就自动安装
+1. 环境自检：需要 git 和 Node.js ≥ 22.13，缺什么就自动安装
   （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
-2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
-   ~/codex-with-chatgpt（已存在就 git pull 更新）。
-3. 构建：在该目录里执行 corepack pnpm install 和 corepack pnpm build。
+2. 下载：把 https://github.com/ksera2w1m-maker/codex-with-chatgpt 克隆到
+   ~/codex-with-chatgpt。已存在时只检查是否有更新；没有我的明确同意，禁止
+   git pull、安装依赖或执行更新后的代码。
+3. 构建：在该目录里执行 corepack pnpm install --frozen-lockfile 和 corepack pnpm build。
 4. 安装 Skill：把仓库里的 skill/SKILL.md 复制到
    ~/.codex/skills/codex-with-chatgpt/SKILL.md，并把文件中
    "The codex-with-chatgpt checkout lives at:" 那一行的路径改成实际克隆路径。
@@ -42,8 +43,9 @@ Agent（Codex），然后去倒杯咖啡：
    Tunnel、端口这些词，不要向我解释；出了问题先自己修。
 ```
 
-**更新**：Skill 每天自动检查一次 GitHub，有新版本会自动更新并继续任务，
-无需任何操作；也可以随时对 Codex 说"更新 Codex with ChatGPT"。
+**更新**：Skill 每天只自动检查一次 GitHub，不会自动安装。发现新版本时只会
+通知你；必须得到你的明确同意后才会执行 git pull、安装依赖和构建。也可以随时
+对 Codex 说"更新 Codex with ChatGPT"。
 
 ## 安装 → 配置 → 使用（手动版）
 
@@ -122,14 +124,14 @@ Ready.
 ```bash
 pnpm install
 pnpm build          # 产出 dist/，暴露 c2c 命令
-pnpm test           # vitest：76 个测试（路径安全、OAuth、配对、MCP 端到端）
+pnpm test           # vitest：93 个测试（路径安全、OAuth、配对、MCP 端到端）
 
 c2c setup           # 一条命令：Bridge + 隧道 + 配对码
 c2c sandbox-allow   # 把本地设置目录加入 Codex 沙箱白名单（macOS / Windows）
 c2c status / doctor / pair / unpair / logs / stop
 ```
 
-环境要求：Node.js >= 20、git；公网连接需要 `cloudflared`
+环境要求：Node.js >= 22.13、git；公网连接需要 `cloudflared`
 （自动检测，Skill 会替你安装）。
 
 文档：[架构](docs/architecture.md) · [协议](docs/protocol.md) ·

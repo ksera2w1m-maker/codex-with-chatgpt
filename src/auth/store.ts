@@ -55,6 +55,7 @@ export type VerifyTokenResult =
 const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const AUTH_CODE_TTL_MS = 5 * 60 * 1000;
+export const MAX_CLIENT_REGISTRATIONS = 64;
 
 function sha256hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -99,6 +100,9 @@ export class AuthStore {
     for (const token of data.tokens ?? []) {
       if (!token.revoked && token.expiresAt > now) this.tokens.set(token.hash, token);
     }
+    const beforePrune = this.clients.size;
+    this.pruneUnusedClients(MAX_CLIENT_REGISTRATIONS);
+    if (this.clients.size !== beforePrune) this.save();
   }
 
   private save(): void {
@@ -110,9 +114,39 @@ export class AuthStore {
     writeSecureJson(this.file, state);
   }
 
+  /** Keep the client registry bounded without evicting clients that still own live tokens. */
+  private pruneUnusedClients(targetSize: number): void {
+    if (this.clients.size <= targetSize) return;
+    const now = Date.now();
+    const activeClientIds = new Set(
+      [...this.tokens.values()]
+        .filter((token) => !token.revoked && token.expiresAt > now)
+        .map((token) => token.clientId)
+    );
+    const unused = [...this.clients.values()]
+      .filter((client) => !activeClientIds.has(client.clientId))
+      .sort((a, b) => {
+        const left = Date.parse(a.createdAt);
+        const right = Date.parse(b.createdAt);
+        return (Number.isFinite(left) ? left : 0) - (Number.isFinite(right) ? right : 0);
+      });
+    for (const client of unused) {
+      if (this.clients.size <= targetSize) break;
+      this.clients.delete(client.clientId);
+    }
+  }
+
   // ---- Dynamic Client Registration -------------------------------------
 
-  registerClient(input: { clientName?: string; redirectUris: string[] }): ClientRegistration {
+  registerClient(input: { clientName?: string; redirectUris: string[] }): ClientRegistration | null {
+    // Unauthenticated DCR is public by design. Bound persisted state and evict
+    // the oldest registrations that have no live token before accepting more.
+    const beforePrune = this.clients.size;
+    this.pruneUnusedClients(MAX_CLIENT_REGISTRATIONS - 1);
+    if (this.clients.size >= MAX_CLIENT_REGISTRATIONS) {
+      if (this.clients.size !== beforePrune) this.save();
+      return null;
+    }
     const client: ClientRegistration = {
       clientId: `c2c_client_${randomBytes(12).toString("base64url")}`,
       clientName: input.clientName,
@@ -260,6 +294,10 @@ export class AuthStore {
     return this.tokens.size;
   }
 
+  clientCount(): number {
+    return this.clients.size;
+  }
+
   static deleteStateFile(workspaceId: string): void {
     const file = path.join(getStateDir(), "auth", `${workspaceId}.json`);
     try {
@@ -274,5 +312,6 @@ export function filterScopes(requested: string | undefined): string[] {
   if (!requested || requested.trim() === "") return [...SUPPORTED_SCOPES];
   const asked = requested.split(/[\s+]+/).filter(Boolean);
   const granted = asked.filter((scope) => (SUPPORTED_SCOPES as readonly string[]).includes(scope));
-  return granted.length > 0 ? granted : [...SUPPORTED_SCOPES];
+  // Non-empty requests fail closed: unknown-only input grants nothing.
+  return granted;
 }
